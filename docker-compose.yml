@@ -94,6 +94,46 @@ services:
 
       restart: unless-stopped
 
+  payment-service:
+    build:
+      context: ./services/payment-service
+
+    environment:
+      PAYMENT_ENVIRONMENT: ${ENVIRONMENT}
+      PAYMENT_LOG_LEVEL: ${LOG_LEVEL}
+
+      PAYMENT_DATABASE_URL: >-
+        postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${PAYMENT_DB}
+
+      PAYMENT_ORDER_SERVICE_URL: http://order-service:8000
+
+      PAYMENT_ORDER_SERVICE_TIMEOUT_SECONDS: ${PAYMENT_ORDER_SERVICE_TIMEOUT_SECONDS:-2.0}
+
+    ports:
+      - "8003:8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      order-service:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2)"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+    restart: unless-stopped
+
 
 
 

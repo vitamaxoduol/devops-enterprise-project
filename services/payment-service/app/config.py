@@ -14,6 +14,11 @@ class Settings(BaseSettings):
 
     order_service_timeout_seconds: float = 2.0
 
+    aws_endpoint_url: str | None = None
+    aws_region: str = "eu-west-1"
+
+    payment_events_queue_name: str = "payment-events"
+
     model_config = SettingsConfigDict(
         env_prefix="PAYMENT_",
         case_sensitive=False,

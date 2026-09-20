@@ -11,6 +11,11 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+import json
+import uuid
+from datetime import datetime, timezone
+from app.events import build_payment_succeeded_event
+from app.models import OutboxEvent, Payment
 
 from app.database import get_db
 from app.domain import (
@@ -175,7 +180,13 @@ def create_payment(
         amount_cents=order.total_amount_cents,
     )
 
+    payment_id = str(uuid.uuid4())
+    event_id = str(uuid.uuid4())
+
+    occurred_at = datetime.now(timezone.utc)
+
     payment = Payment(
+        id=payment_id,
         order_id=order.id,
         user_id=order.user_id,
         amount_cents=order.total_amount_cents,
@@ -187,7 +198,35 @@ def create_payment(
         idempotency_key=idempotency_key,
     )
 
-    db.add(payment)
+    event_payload = (
+        build_payment_succeeded_event(
+            event_id=event_id,
+            payment_id=payment_id,
+            order_id=order.id,
+            user_id=order.user_id,
+            amount_cents=(
+                order.total_amount_cents
+            ),
+            occurred_at=occurred_at,
+        )
+    )
+
+    outbox_event = OutboxEvent(
+        id=event_id,
+        aggregate_type="payment",
+        aggregate_id=payment_id,
+        event_type="payment.succeeded",
+        payload=json.dumps(
+            event_payload, separators=(",", ":"),
+        )
+    )
+
+    db.add_all(
+        [
+            payment,
+            outbox_event,
+        ]
+    )
 
     try:
         db.commit()

@@ -109,6 +109,14 @@ services:
 
       PAYMENT_ORDER_SERVICE_TIMEOUT_SECONDS: ${PAYMENT_ORDER_SERVICE_TIMEOUT_SECONDS:-2.0}
 
+      PAYMENT_AWS_ENDPOINT_URL: http://localstack:4566
+      PAYMENT_AWS_REGION: ${AWS_DEFAULT_REGION}
+      PAYMENT_PAYMENT_EVENTS_QUEUE_NAME: ${PAYMENT_EVENTS_QUEUE_NAME}
+
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+
     ports:
       - "8003:8000"
 
@@ -134,8 +142,161 @@ services:
 
     restart: unless-stopped
 
+  localstack:
+    image: localstack/localstack:latest
 
+    environment:
+      SERVICES: sqs
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN}
 
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+
+      PAYMENT_EVENTS_QUEUE_NAME: ${PAYMENT_EVENTS_QUEUE_NAME}
+      PAYMENT_EVENTS_DLQ_NAME: ${PAYMENT_EVENTS_DLQ_NAME}
+
+    ports:
+      - "4566:4566"
+
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./docker/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "awslocal sqs get-queue-url --queue-name \"$${PAYMENT_EVENTS_QUEUE_NAME}\" >/dev/null 2>&1"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+    restart: unless-stopped
+  
+
+  payment-event-publisher:
+    build:
+      context: ./services/payment-service
+
+    command:
+      [
+        "python",
+        "-m",
+        "app.outbox_publisher"
+      ]
+
+    environment:
+      PAYMENT_ENVIRONMENT: ${ENVIRONMENT}
+      PAYMENT_LOG_LEVEL: ${LOG_LEVEL}
+
+      PAYMENT_DATABASE_URL: >-
+        postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${PAYMENT_DB}
+
+      PAYMENT_AWS_ENDPOINT_URL: http://localstack:4566
+      PAYMENT_AWS_REGION: ${AWS_DEFAULT_REGION}
+
+      PAYMENT_PAYMENT_EVENTS_QUEUE_NAME: ${PAYMENT_EVENTS_QUEUE_NAME}
+
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+
+    depends_on:
+      payment-service:
+        condition: service_healthy
+
+      localstack:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+
+    environment:
+      NOTIFICATION_ENVIRONMENT: ${ENVIRONMENT}
+      NOTIFICATION_LOG_LEVEL: ${LOG_LEVEL}
+
+      NOTIFICATION_DATABASE_URL: >-
+        postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${NOTIFICATION_DB}
+
+      NOTIFICATION_AWS_ENDPOINT_URL: http://localstack:4566
+      NOTIFICATION_AWS_REGION: ${AWS_DEFAULT_REGION}
+
+      NOTIFICATION_PAYMENT_EVENTS_QUEUE_NAME: ${PAYMENT_EVENTS_QUEUE_NAME}
+
+      NOTIFICATION_SQS_WAIT_TIME_SECONDS: ${SQS_WAIT_TIME_SECONDS:-10}
+
+      NOTIFICATION_SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:-5}
+
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+
+    ports:
+      - "8004:8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2)"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+    restart: unless-stopped
+
+  notification-worker:
+    build:
+      context: ./services/notification-service
+
+    command:
+      [
+        "python",
+        "-m",
+        "app.worker"
+      ]
+
+    environment:
+      NOTIFICATION_ENVIRONMENT: ${ENVIRONMENT}
+      NOTIFICATION_LOG_LEVEL: ${LOG_LEVEL}
+
+      NOTIFICATION_DATABASE_URL: >-
+        postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${NOTIFICATION_DB}
+
+      NOTIFICATION_AWS_ENDPOINT_URL: http://localstack:4566
+      NOTIFICATION_AWS_REGION: ${AWS_DEFAULT_REGION}
+
+      NOTIFICATION_PAYMENT_EVENTS_QUEUE_NAME: ${PAYMENT_EVENTS_QUEUE_NAME}
+
+      NOTIFICATION_SQS_WAIT_TIME_SECONDS: ${SQS_WAIT_TIME_SECONDS:-10}
+
+      NOTIFICATION_SQS_VISIBILITY_TIMEOUT_SECONDS: ${SQS_VISIBILITY_TIMEOUT_SECONDS:-5}
+
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+
+    depends_on:
+      notification-service:
+        condition: service_healthy
+
+      localstack:
+        condition: service_healthy
+
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  localstack_data:

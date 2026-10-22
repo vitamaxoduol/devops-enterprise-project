@@ -23,12 +23,41 @@ from app.sqs_client import (
     create_sqs_client,
     get_payment_queue_url,
 )
+from prometheus_client import (
+    Counter,
+    start_http_server,
+)
 
 
-configure_logging()
+
+configure_logging(
+    "notification-service"
+)
 
 logger = structlog.get_logger()
 
+EVENTS_RECEIVED_TOTAL = Counter(
+    "notification_events_received_total",
+    "Payment events received by the notification worker.",
+)
+
+
+NOTIFICATIONS_CREATED_TOTAL = Counter(
+    "notifications_created_total",
+    "Notifications successfully created.",
+)
+
+
+DUPLICATE_EVENTS_TOTAL = Counter(
+    "notification_duplicate_events_total",
+    "Duplicate payment events ignored.",
+)
+
+
+EVENT_PROCESSING_FAILURES_TOTAL = Counter(
+    "notification_event_processing_failures_total",
+    "Notification event processing failures.",
+)
 
 def process_message(
     body: str,
@@ -47,9 +76,10 @@ def process_message(
         json.JSONDecodeError,
         ValidationError,
     ):
+        EVENT_PROCESSING_FAILURES_TOTAL.inc()
+
         logger.exception(
-            "invalid_payment_event",
-            message_body=body,
+            "invalid_payment_event"
         )
 
         return False
@@ -63,6 +93,8 @@ def process_message(
         )
 
         if existing is not None:
+            DUPLICATE_EVENTS_TOTAL.inc()
+
             logger.info(
                 "duplicate_event_ignored",
                 event_id=event.event_id,
@@ -98,6 +130,8 @@ def process_message(
             db.commit()
             db.refresh(notification)
 
+            NOTIFICATIONS_CREATED_TOTAL.inc()
+
         except IntegrityError:
             db.rollback()
 
@@ -109,6 +143,8 @@ def process_message(
             )
 
             if existing is not None:
+                DUPLICATE_EVENTS_TOTAL.inc()
+
                 logger.info(
                     "duplicate_event_ignored",
                     event_id=event.event_id,
@@ -132,6 +168,9 @@ def process_message(
 
 
 def main() -> None:
+    start_http_server(
+        9100
+    )
     Base.metadata.create_all(
         bind=engine
     )
@@ -180,6 +219,8 @@ def main() -> None:
             )
 
             for message in messages:
+                EVENTS_RECEIVED_TOTAL.inc()
+
                 receive_count = (
                     message
                     .get(
@@ -235,6 +276,8 @@ def main() -> None:
             time.sleep(2)
 
         except Exception:
+            EVENT_PROCESSING_FAILURES_TOTAL.inc()
+
             logger.exception(
                 "notification_worker_unexpected_error"
             )

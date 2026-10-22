@@ -14,6 +14,11 @@ from app.user_client import (
     UserServiceUnavailableError,
     get_user,
 )
+from app.metrics import (
+    ORDERS_CREATED_TOTAL,
+    ORDER_VALUE_CENTS,
+    ORDER_UPSTREAM_FAILURES_TOTAL,
+)
 
 
 router = APIRouter(
@@ -39,12 +44,20 @@ def create_order(
         )
 
     except UserNotFoundError as exc:
+        # Do NOT increment upstream failure here.
+        # User Service worked correctly and told us
+        # that the user simply does not exist.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found.",
         ) from exc
 
     except UserServiceUnavailableError as exc:
+        # User Service could not be reached / timed out / returned 5xx.
+        ORDER_UPSTREAM_FAILURES_TOTAL.labels(
+            reason="unavailable"
+        ).inc()
+
         logger.warning(
             "user_service_unavailable",
             user_id=payload.user_id,
@@ -56,6 +69,12 @@ def create_order(
         ) from exc
 
     except UserServiceBadResponseError as exc:
+        # User Service responded, but the response was invalid
+        # or otherwise unexpected.
+        ORDER_UPSTREAM_FAILURES_TOTAL.labels(
+            reason="bad_response"
+        ).inc()
+
         logger.error(
             "user_service_bad_response",
             user_id=payload.user_id,
@@ -109,6 +128,14 @@ def create_order(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to create order.",
         )
+
+    # The order definitely exists in the database now.
+    ORDERS_CREATED_TOTAL.inc()
+
+    # Record the value of this successfully created order.
+    ORDER_VALUE_CENTS.observe(
+        order.total_amount_cents
+    )
 
     logger.info(
         "order_created",

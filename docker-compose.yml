@@ -202,6 +202,9 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
 
+    ports:
+      - "9101:9100"
+
     depends_on:
       payment-service:
         condition: service_healthy
@@ -287,6 +290,9 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+    
+    ports:
+      - "9102:9100"
 
     depends_on:
       notification-service:
@@ -294,6 +300,23 @@ services:
 
       localstack:
         condition: service_healthy
+
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+
+    command:
+      [
+        "--config=/etc/otelcol-contrib/config.yaml"
+      ]
+
+    volumes:
+      - ./docker/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+
+    ports:
+      - "4317:4317"
+      - "4318:4318"
 
     restart: unless-stopped
 

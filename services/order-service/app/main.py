@@ -11,9 +11,16 @@ from app.database import (
 from app.logging import configure_logging
 from app.routes import router
 from app.user_client import user_service_is_ready
+from app.middleware import (
+    install_request_context_middleware,
+)
+from app.telemetry import (
+    configure_telemetry,
+)
 
-
-configure_logging()
+configure_logging(
+    "order-service"
+)
 
 logger = structlog.get_logger()
 
@@ -23,6 +30,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+install_request_context_middleware(
+    app
+)
+
+configure_telemetry(
+    service_name="order-service",
+    app=app,
+    engine=engine,
+)
 
 @app.on_event("startup")
 def startup() -> None:

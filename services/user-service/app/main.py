@@ -5,9 +5,17 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.database import Base, database_is_ready, engine
 from app.logging import configure_logging
 from app.routes import router
+from app.middleware import (
+    install_request_context_middleware,
+)
+from app.telemetry import (
+    configure_telemetry,
+)
 
 
-configure_logging()
+configure_logging(
+    "user-service"
+)
 
 logger = structlog.get_logger()
 
@@ -15,6 +23,16 @@ logger = structlog.get_logger()
 app = FastAPI(
     title="User Service",
     version="1.0.0",
+)
+
+install_request_context_middleware(
+    app
+)
+
+configure_telemetry(
+    service_name="user-service",
+    app=app,
+    engine=engine,
 )
 
 

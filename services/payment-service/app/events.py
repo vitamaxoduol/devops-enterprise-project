@@ -1,4 +1,11 @@
 from datetime import datetime, timezone
+from opentelemetry.propagate import (
+    inject,
+)
+
+from app.request_context import (
+    get_request_id,
+)
 
 
 def build_payment_succeeded_event(
@@ -15,11 +22,23 @@ def build_payment_succeeded_event(
         or datetime.now(timezone.utc)
     )
 
+    trace_context: dict[str, str] = {}
+
+    inject(
+        trace_context
+    )
+
     return {
         "event_id": event_id,
         "event_type": "payment.succeeded",
         "schema_version": 1,
         "occurred_at": timestamp.isoformat(),
+        "correlation_id": (
+            get_request_id()
+        ),
+        "trace_context": (
+            trace_context
+        ),
         "data": {
             "payment_id": payment_id,
             "order_id": order_id,

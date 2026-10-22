@@ -11,9 +11,21 @@ from app.database import (
 from app.logging import configure_logging
 from app.order_client import order_service_is_ready
 from app.routes import router
+from app.middleware import (
+    install_request_context_middleware,
+)
+from app.telemetry import (
+    configure_telemetry,
+)
+from app.database import (
+    SessionLocal,
+    engine,
+)
 
 
-configure_logging()
+configure_logging(
+    "payment-service"
+)
 
 logger = structlog.get_logger()
 
@@ -23,6 +35,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+install_request_context_middleware(
+    app
+)
+
+configure_telemetry(
+    service_name="payment-service",
+    app=app,
+    engine=engine,
+    instrument_botocore=True,
+)
 
 @app.on_event("startup")
 def startup() -> None:

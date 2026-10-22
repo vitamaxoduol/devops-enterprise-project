@@ -2,6 +2,9 @@ import httpx
 
 from app.config import settings
 from app.schemas import UserLookupResponse
+from app.request_context import (
+    get_request_id,
+)
 
 
 class UserNotFoundError(Exception):
@@ -28,9 +31,22 @@ def get_user(
             timeout=settings.user_service_timeout_seconds,
         )
 
+
     try:
+
+        headers = {}
+
+        request_id = get_request_id()
+
+        if request_id:
+            headers[
+                "X-Request-ID"
+            ] = request_id
+
+
         response = client.get(
             f"/users/{user_id}",
+            headers=headers
         )
 
         if response.status_code == 404:

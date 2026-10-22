@@ -2,6 +2,9 @@ import httpx
 
 from app.config import settings
 from app.schemas import OrderLookupResponse
+from app.request_context import (
+    get_request_id,
+)
 
 
 class OrderNotFoundError(Exception):
@@ -29,8 +32,17 @@ def get_order(
         )
 
     try:
+        headers = {}
+
+        request_id = get_request_id()
+
+        if request_id:
+            headers[
+                "X-Request-ID"
+            ] = request_id
         response = client.get(
-            f"/orders/{order_id}"
+            f"/orders/{order_id}",
+            headers=headers
         )
 
         if response.status_code == 404:

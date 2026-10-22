@@ -1,3 +1,5 @@
+import structlog
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -6,9 +8,11 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
 from app.schemas import UserCreate, UserResponse
+from app.metrics import USERS_CREATED_TOTAL
 
 
 router = APIRouter(prefix="/users", tags=["users"])
+logger = structlog.get_logger()
 
 
 @router.post(
@@ -39,6 +43,11 @@ def create_user(
         )
 
     db.refresh(user)
+
+    # Increment only after the user was successfully created.
+    USERS_CREATED_TOTAL.inc()
+
+    logger.info("user_created", user_id=user.id)
 
     return user
 

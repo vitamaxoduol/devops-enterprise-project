@@ -17,9 +17,17 @@ from app.database import (
 from app.logging import configure_logging
 from app.routes import router
 from app.sqs_client import sqs_is_ready
+from app.middleware import (
+    install_request_context_middleware,
+)
+from app.telemetry import (
+    configure_telemetry,
+)
 
 
-configure_logging()
+configure_logging(
+    "notification-service"
+)
 
 logger = structlog.get_logger()
 
@@ -29,6 +37,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+install_request_context_middleware(
+    app
+)
+
+configure_telemetry(
+    service_name="notification-service",
+    app=app,
+    engine=engine,
+    instrument_botocore=True,
+)
 
 @app.on_event("startup")
 def startup() -> None:

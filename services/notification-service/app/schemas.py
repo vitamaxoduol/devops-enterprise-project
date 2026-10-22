@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
 )
 
 
@@ -24,6 +25,14 @@ class PaymentSucceededEvent(BaseModel):
     schema_version: Literal[1]
 
     occurred_at: datetime
+
+    correlation_id: str | None = None
+
+    trace_context: dict[str, str] = (
+        Field(
+            default_factory=dict
+        )
+    )
 
     data: PaymentSucceededData
 

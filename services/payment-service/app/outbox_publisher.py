@@ -1,4 +1,5 @@
 import time
+import json
 from datetime import datetime, timezone
 
 import boto3
@@ -7,17 +8,54 @@ from botocore.exceptions import (
     BotoCoreError,
     ClientError,
 )
-from sqlalchemy import select
+from sqlalchemy import (
+    select,
+    func
+)
 
 from app.config import settings
 from app.database import SessionLocal
 from app.logging import configure_logging
 from app.models import OutboxEvent
 
+from opentelemetry import trace
+from opentelemetry.propagate import (
+    extract,
+    inject,
+)
+from opentelemetry.trace import (
+    SpanKind,
+)
 
-configure_logging()
+from app.telemetry import (
+    configure_telemetry,
+)
+from prometheus_client import (
+    Counter,
+    Gauge,
+    start_http_server,
+)
+
+
+configure_logging(
+    "payment-event-publisher"
+    )
 
 logger = structlog.get_logger()
+
+OUTBOX_PUBLISH_TOTAL = Counter(
+    "outbox_publish_total",
+    "Outbox publication attempts.",
+    [
+        "result",
+    ],
+)
+
+
+OUTBOX_PENDING = Gauge(
+    "outbox_pending_events",
+    "Number of unpublished outbox events.",
+)
 
 
 def create_sqs_client():
@@ -60,10 +98,55 @@ def publish_next_event(
             return False
 
         try:
-            client.send_message(
-                QueueUrl=queue_url,
-                MessageBody=event.payload,
+            payload = json.loads(
+                event.payload
             )
+
+            parent_context = extract(
+                payload.get(
+                    "trace_context",
+                    {},
+                )
+            )
+
+            with tracer.start_as_current_span(
+                "payment.succeeded publish",
+                context=parent_context,
+                kind=SpanKind.PRODUCER,
+            ) as span:
+
+                span.set_attribute(
+                    "messaging.system",
+                    "aws_sqs",
+                )
+
+                span.set_attribute(
+                    "messaging.destination.name",
+                    settings.payment_events_queue_name,
+                )
+
+                span.set_attribute(
+                    "event.id",
+                    event.id,
+                )
+
+                outgoing_context: dict[str, str] = {}
+
+                inject(
+                    outgoing_context
+                )
+
+                payload[
+                    "trace_context"
+                ] = outgoing_context
+
+                client.send_message(
+                    QueueUrl=queue_url,
+                    MessageBody=json.dumps(
+                        payload,
+                        separators=(",", ":"),
+                    ),
+                )
 
         except (
             BotoCoreError,
@@ -71,6 +154,10 @@ def publish_next_event(
         ):
             event.publish_attempts += 1
             db.commit()
+
+            OUTBOX_PUBLISH_TOTAL.labels(
+                result="failure"
+            ).inc()
 
             logger.exception(
                 "outbox_publish_failed",
@@ -89,6 +176,10 @@ def publish_next_event(
 
         db.commit()
 
+        OUTBOX_PUBLISH_TOTAL.labels(
+            result="success"
+        ).inc()
+
         logger.info(
             "outbox_event_published",
             event_id=event.id,
@@ -99,8 +190,31 @@ def publish_next_event(
 
         return True
 
+def update_pending_metric() -> None:
+    with SessionLocal() as db:
+        pending = db.scalar(
+            select(
+                func.count()
+            )
+            .select_from(
+                OutboxEvent
+            )
+            .where(
+                OutboxEvent.published_at.is_(
+                    None
+                )
+            )
+        )
+
+    OUTBOX_PENDING.set(
+        pending or 0
+    )
+
 
 def main() -> None:
+    start_http_server(
+        9100
+    )
     logger.info(
         "outbox_publisher_started",
         queue=(
@@ -114,6 +228,9 @@ def main() -> None:
 
     while True:
         try:
+            
+            update_pending_metric()
+
             if queue_url is None:
                 queue_url = get_queue_url(
                     client

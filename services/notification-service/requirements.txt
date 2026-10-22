@@ -10,3 +10,8 @@ opentelemetry-api
 opentelemetry-sdk
 opentelemetry-instrumentation-fastapi
 pytest
+opentelemetry-exporter-otlp-proto-grpc
+opentelemetry-instrumentation-httpx
+opentelemetry-instrumentation-sqlalchemy
+opentelemetry-instrumentation-botocore
+httpx

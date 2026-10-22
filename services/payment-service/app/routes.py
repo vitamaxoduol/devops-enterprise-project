@@ -36,6 +36,12 @@ from app.schemas import (
     PaymentResponse,
 )
 
+from app.metrics import (
+    PAYMENTS_SUCCEEDED_TOTAL,
+    PAYMENT_IDEMPOTENCY_REPLAYS_TOTAL,
+    PAYMENT_UPSTREAM_FAILURES_TOTAL,
+    OUTBOX_EVENTS_CREATED_TOTAL,
+)
 
 router = APIRouter(
     prefix="/payments",
@@ -100,6 +106,8 @@ def create_payment(
                 ),
             )
 
+        PAYMENT_IDEMPOTENCY_REPLAYS_TOTAL.inc()
+
         logger.info(
             "payment_idempotency_replay",
             payment_id=existing_by_key.id,
@@ -133,6 +141,10 @@ def create_payment(
         ) from exc
 
     except OrderServiceUnavailableError as exc:
+        PAYMENT_UPSTREAM_FAILURES_TOTAL.labels(
+            reason="unavailable"
+        ).inc()
+
         logger.warning(
             "order_service_unavailable",
             order_id=payload.order_id,
@@ -146,6 +158,10 @@ def create_payment(
         ) from exc
 
     except OrderServiceBadResponseError as exc:
+        PAYMENT_UPSTREAM_FAILURES_TOTAL.labels(
+            reason="bad_response"
+        ).inc()
+
         logger.error(
             "order_service_bad_response",
             order_id=payload.order_id,
@@ -232,6 +248,10 @@ def create_payment(
         db.commit()
         db.refresh(payment)
 
+        PAYMENTS_SUCCEEDED_TOTAL.inc()
+
+        OUTBOX_EVENTS_CREATED_TOTAL.inc()
+
     except IntegrityError:
         db.rollback()
 
@@ -247,6 +267,9 @@ def create_payment(
             and existing_by_key.order_id
             == payload.order_id
         ):
+
+            PAYMENT_IDEMPOTENCY_REPLAYS_TOTAL.inc()
+            
             response.status_code = status.HTTP_200_OK
 
             return existing_by_key
